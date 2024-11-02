@@ -1,0 +1,4 @@
+.venv
+.vscode
+.tool-versions
+__pycache__
