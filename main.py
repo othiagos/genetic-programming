@@ -1,36 +1,32 @@
+import argparse
 import csv
 import random
+import time
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 import numpy as np
 from sklearn.cluster import AgglomerativeClustering
-from sklearn.metrics import completeness_score, homogeneity_score
+from sklearn.metrics import v_measure_score
 
-# Configurações globais
-MAX_INDIVIDUAL_SIZE = 9
-POPULATION_SIZES = [30, 50, 100, 500]
-GENERATIONS = [30, 50, 100, 500]
-CROSSOVER_PROBABILITIES = [0.9, 0.6]
-MUTATION_PROBABILITIES = [0.05, 0.3]
-ELITISM = True
-
-# random.seed(137)
-
+# Constants
 OPERATOR = ["+", "-", "*", "/"]
 CONSTANT = [f"{number:.3}" for number in np.arange(-2, 2, 0.05)]
 LEN_OPERATOR = len(OPERATOR)
 LEN_CONSTANT = len(CONSTANT)
 
 
-# 1. Representação de um Indivíduo
 class Individual:
-    def __init__(self, genotype=None, depth=MAX_INDIVIDUAL_SIZE - 1):
-        self.fitness = None
-        self.depth = depth
+    def __init__(self, genotype=None, depth=1):
+        self.fitness = 0
+        self.depth = depth - 1
+        self.max_depth = self.depth
         self.genotype = self.genotype_vector(genotype)
         self.phenotype = self.phenotype_expr(self.genotype)
 
-    def update_gen(self):
-        self.depth = MAX_INDIVIDUAL_SIZE - 1
+    def update_genotype(self, i, value):
+        self.fitness = 0
+        self.depth = self.max_depth
+        self.genotype[i] = value
         self.phenotype = self.phenotype_expr(self.genotype)
 
     def genotype_vector(self, genotype=None):
@@ -48,12 +44,12 @@ class Individual:
     def phenotype_expr(self, genotype):
         genotype = genotype[::-1]
 
-        phenotype = self.terminal(genotype[0 : 2])
+        phenotype = self.terminal(genotype[0:2])
         for i in range(2, len(genotype), 2):
             phenotype = self.terminal(genotype[i : i + 2]) + " + " + phenotype
 
         return phenotype
-    
+
     def terminal(self, numbers):
         index = self.depth
         self.depth -= 1
@@ -62,7 +58,7 @@ class Individual:
         op = self.operator(numbers[0])
 
         if op == "/":
-            return f"{const} {op} (abs(xi_{index} - xj_{index}) + 1e-6)" 
+            return f"{const} {op} (abs(xi_{index} - xj_{index}) + 1e-6)"
 
         return f"{const} {op} abs(xi_{index} - xj_{index})"
 
@@ -73,48 +69,39 @@ class Individual:
         return CONSTANT[number]
 
 
-# 2. Geração da População Inicial
-def generate_initial_population(size):
-    return [Individual() for _ in range(size)]
+def generate_initial_population(size, individual_size):
+    return [Individual(depth=individual_size) for _ in range(size)]
 
 
-# 3. Função de Avaliação (Fitness)
-def evaluate_fitness(individual, X, y):
+def evaluate_fitness(individual, X, y, max_individual_size):
     try:
-        # Calcula a matriz de distâncias usando a expressão do indivíduo
-        distances = np.array(
-            [
-                [
-                    safe_eval(
-                        individual.phenotype,
-                        {
-                            **{f"xi_{i}": xi[i] for i in range(MAX_INDIVIDUAL_SIZE)},
-                            **{f"xj_{i}": xj[i] for i in range(MAX_INDIVIDUAL_SIZE)},
-                        },
-                    )
-                    for xj in X
-                ]
-                for xi in X
-            ]
-        )
+        num_samples = len(X)
+        distances = np.zeros((num_samples, num_samples))
 
-        # print(individual.genotype)
-        # print(individual.phenotype)
-        # print()
+        for i in range(num_samples):
+            for j in range(i + 1, num_samples):
+                distance = safe_eval(
+                    individual.phenotype,
+                    {
+                        **{f"xi_{k}": X[i][k] for k in range(max_individual_size)},
+                        **{f"xj_{k}": X[j][k] for k in range(max_individual_size)},
+                    },
+                )
+                distances[i, j] = distance
+                distances[j, i] = distance
 
-
-        clustering = AgglomerativeClustering(n_clusters=len(set(y)), metric="precomputed", linkage="average")
+        clustering = AgglomerativeClustering(n_clusters=len(set(y)), metric="precomputed", linkage="complete")
         labels = clustering.fit_predict(distances)
-        homogeneity = float(homogeneity_score(y, labels))
-        completeness = float(completeness_score(y, labels))
-        beta = 1
-        individual.fitness = (1 + beta) * homogeneity * completeness / (beta * homogeneity + completeness)
+
+        individual.fitness = v_measure_score(y, labels)
+    except ZeroDivisionError:
+        individual.fitness = 0
     except Exception as e:
-        individual.fitness = 0  # Penaliza expressões que falham
+        print(f"Erro na avaliação da fitness: {e}")
+        individual.fitness = 0
     return individual.fitness
 
 
-# Função para avaliar expressões de forma segura, evitando divisão por zero
 def safe_eval(expression, vars_dict):
     try:
         result = eval(expression, {}, vars_dict)
@@ -122,101 +109,161 @@ def safe_eval(expression, vars_dict):
             return result
         else:
             return 0
-    except ZeroDivisionError as e:
-        print(e)
-        return 0
-    except Exception as e:
-        print(e)
+    except (ZeroDivisionError, Exception):
         return 0
 
 
-# 4. Operadores Genéticos
-def crossover(parent1, parent2):
-    if random.random() < CROSSOVER_PROBABILITIES[0]:
-        i = random.randrange(0, len(parent1.genotype))
+def crossover(parent1, parent2, crossover_prob):
+    if random.random() < crossover_prob:
+        i = random.randrange(0, len(parent1.genotype) - 1)
+        j = random.randrange(i + 1, len(parent1.genotype))
 
-        genotype = parent1.genotype[:i] + parent2.genotype[i:]
-        return Individual(genotype)
-    
-    return parent1
+        genotype1 = parent1.genotype[:i] + parent2.genotype[i:j] + parent1.genotype[j:]
+        genotype2 = parent2.genotype[:i] + parent1.genotype[i:j] + parent2.genotype[j:]
+        return Individual(genotype1), Individual(genotype2)
+
+    return parent1, parent2
 
 
-def mutate(individual):
-    if random.random() < MUTATION_PROBABILITIES[0]:
+def mutate(individual, mutation_prob):
+    if random.random() < mutation_prob:
         i = random.randrange(0, len(individual.genotype))
-
-        new_value = None
         if i % 2 == 0:
             new_value = random.randrange(0, LEN_CONSTANT)
         else:
             new_value = random.randrange(0, LEN_OPERATOR)
-
-        individual.genotype[i] = new_value
-        individual.update_gen()
+        individual.update_genotype(i, new_value)
     return individual
 
 
-# 5. Algoritmo de Programação Genética
-def genetic_programming(X, y):
-    population = generate_initial_population(POPULATION_SIZES[2])
+def genetic_programming(
+    X, y, population_size, generations, crossover_prob, mutation_prob, elitism, max_individual_size, use_multithreading
+):  
+    population = generate_initial_population(population_size, max_individual_size)
 
-    # for p in population:
-    #     print(p.genotype)
-    #     print(p.phenotype)
-    #     print()
+    for generation in range(generations):
+        if use_multithreading:
+            with ProcessPoolExecutor() as executor:
+                futures = {executor.submit(evaluate_fitness, ind, X, y, max_individual_size): ind for ind in population}
+                for future in as_completed(futures):
+                    ind = futures[future]
+                    ind.fitness = future.result()
+        else:
+            for ind in population:
+                ind.fitness = evaluate_fitness(ind, X, y, max_individual_size)
+        for p in population:
+            print(p.genotype)
 
-    # return
-    for generation in range(GENERATIONS[0]):
-        for individual in population:
-            evaluate_fitness(individual, X, y)
-
-        # for p in population:
-            # print(p.genotype)
-            # print(p.phenotype)
-            # print()
+        best_fitness = np.max([ind.fitness for ind in population if ind.fitness is not None])
+        worst_fitness = np.min([ind.fitness for ind in population if ind.fitness is not None])
+        avg_fitness = np.mean([ind.fitness for ind in population if ind.fitness is not None])
+        print(f"Geração {generation}: Melhor {best_fitness:.3}, Pior {worst_fitness:.3}, Média {avg_fitness:.3}")
 
         new_population = []
         for _ in range(len(population) // 2):
-            parent1 = tournament_selection(population)
-            parent2 = tournament_selection(population)
-            child1 = crossover(parent1, parent2)
-            child2 = crossover(parent2, parent1)
-            new_population.extend([mutate(child1), mutate(child2)])
+            parents1 = tournament_selection(population)
+            child1, child2 = crossover(parents1[0], parents1[1], crossover_prob)
+            new_population.extend([mutate(child1, mutation_prob), mutate(child2, mutation_prob)])
 
-        if ELITISM:
+        if elitism:
             population.sort(key=lambda ind: ind.fitness, reverse=True)
-            new_population = population[: len(population) // 10] + new_population
+            new_population = population[:2] + new_population
 
+        population.sort(key=lambda ind: ind.fitness, reverse=True)
         population = new_population[: len(population)]
 
-        best_fitness = max(ind.fitness for ind in population if ind.fitness is not None)
-        worst_fitness = min(ind.fitness for ind in population if ind.fitness is not None)
-        avg_fitness = np.mean([ind.fitness for ind in population if ind.fitness is not None])
-        print(f"Geração {generation}: Melhor {best_fitness}, Pior {worst_fitness}, Média {avg_fitness}")
+
+    population.sort(key=lambda ind: ind.fitness, reverse=True)
+    return population[0]
 
 
-# 6. Seleção por Torneio
-def tournament_selection(population, k=2):
+def tournament_selection(population):
+    k = max(2, len(population) // 10)
     selected = random.sample(population, k)
     selected.sort(key=lambda ind: ind.fitness, reverse=True)
-    return selected[0]
+    return selected[:2]
 
 
-# Exemplo de execução
-if __name__ == "__main__":
-    n = 7  # Número de variáveis por elemento (atualizado para 7)
-    X_train = []
-    y_train = []
+def test(X, y, population, max_individual_size, use_multithreading):
+    if use_multithreading:
+        with ProcessPoolExecutor() as executor:
+            futures = {executor.submit(evaluate_fitness, ind, X, y, max_individual_size): ind for ind in population}
+            for future in as_completed(futures):
+                ind = futures[future]
+                ind.fitness = future.result()
+    else:
+        for ind in population:
+            ind.fitness = evaluate_fitness(ind, X, y, max_individual_size)
 
-    # Carregando os dados do CSV
-    with open("data/breast_cancer_coimbra_test.csv", newline="") as csv_file:
+    best_fitness = np.max([ind.fitness for ind in population if ind.fitness is not None])
+    print(f"Geração test: Melhor {best_fitness:.3}")
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Configurações do algoritmo de programação genética")
+    parser.add_argument("--population_size", type=int, default=30, help="Tamanho da população")
+    parser.add_argument("--generations", type=int, default=30, help="Número de gerações")
+    parser.add_argument("--crossover_prob", type=float, default=0.9, help="Probabilidade de crossover")
+    parser.add_argument("--mutation_prob", type=float, default=0.05, help="Probabilidade de mutação")
+    parser.add_argument(
+        "--elitism", type=int, default=1, help="Se deve usar elitismo (0 para não, qualquer outro número para sim)"
+    )
+    parser.add_argument("--individual_size", type=int, help="Tamanho máximo dos indivíduos (tamanho de X_train)")
+    parser.add_argument("--seed", type=int, help="Semente para o gerador de números aleatórios")
+    parser.add_argument(
+        "--use_multithreading",
+        type=int,
+        default=0,
+        help="Usar múltiplas threads para avaliação de fitness (0 para não, qualquer outro número para sim)",
+    )
+    args = parser.parse_args()
+
+    if args.seed is not None:
+        random.seed(args.seed)
+        np.random.seed(args.seed)
+    else:
+        random.seed(int(time.time()))
+        np.random.seed(int(time.time()))
+
+    # Carregar os dados de treino
+    X_train, y_train = [], []
+    with open("data/breast_cancer_coimbra_train.csv", newline="") as csv_file:
         reader = csv.DictReader(csv_file)
         for row in reader:
             values = list(row.values())
-            X_train.append([float(v) for v in values[:-1]])  # Convertendo para float
-            y_train.append(float(values[-1]))  # Supondo que os rótulos são valores float
+            X_train.append([float(v) for v in values[:-1]])
+            y_train.append(float(values[-1]))
 
     X_train = np.array(X_train)
     y_train = np.array(y_train)
 
-    genetic_programming(X_train, y_train)
+    # Executar o algoritmo de programação genética
+    best_individual = genetic_programming(
+        X_train,
+        y_train,
+        args.population_size,
+        args.generations,
+        args.crossover_prob,
+        args.mutation_prob,
+        args.elitism != 0,  # Convert the integer to a boolean
+        args.individual_size,
+        args.use_multithreading != 0,  # Convert the integer to a boolean
+    )
+
+    # Carregar os dados de teste
+    X_test, y_test = [], []
+    with open("data/breast_cancer_coimbra_test.csv", newline="") as csv_file:
+        reader = csv.DictReader(csv_file)
+        for row in reader:
+            values = list(row.values())
+            X_test.append([float(v) for v in values[:-1]])
+            y_test.append(float(values[-1]))
+
+    X_test = np.array(X_test)
+    y_test = np.array(y_test)
+
+    test(X_test, y_test, [best_individual], args.individual_size, args.use_multithreading != 0)
+
+
+if __name__ == "__main__":
+    main()
