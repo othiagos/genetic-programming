@@ -58,28 +58,51 @@ class Individual:
         op = self.operator(numbers[0])
 
         if op == "/":
-            return f"{const} {op} (abs(xi_{index} - xj_{index}) + 1e-6)"
+            return f"{const} {op} (abs(xi_{index} - yj_{index}) + 1e-6)"
 
-        return f"{const} {op} abs(xi_{index} - xj_{index})"
+        return f"{const} {op} abs(xi_{index} - yj_{index})"
 
     def operator(self, number):
         return OPERATOR[number]
 
     def constant(self, number):
         return CONSTANT[number]
-    
+
     def __gt__(self, other):
         if self.fitness == None:
             return False
-        
+
         if other.fitness == None:
             return True
-        
+
         return self.fitness > other.fitness
 
 
 def generate_initial_population(size, individual_size):
     return [Individual(depth=individual_size) for _ in range(size)]
+
+
+def share_distance(individual1, individual2):
+    distance = 0
+
+    for i in range(len(individual1.genotype)):
+        if individual1.genotype[i] != individual2.genotype[i]:
+            distance += 1
+
+    return distance
+
+
+
+def fitness_sharing(individual, population, share_threshold=9):
+
+    sum_sh = 0
+    for ind in population:
+        diff = share_distance(individual, ind)
+
+        if diff < share_threshold:
+            sum_sh += 1 - (diff / share_threshold)
+
+    return sum_sh
 
 
 def evaluate_fitness(individual, X, y, max_individual_size):
@@ -89,7 +112,7 @@ def evaluate_fitness(individual, X, y, max_individual_size):
             return individual.fitness
 
         num_samples = len(X)
-        distances = np.zeros((num_samples, num_samples))
+        matrix_distances = np.zeros((num_samples, num_samples))
 
         for i in range(num_samples):
             for j in range(i + 1, num_samples):
@@ -97,14 +120,14 @@ def evaluate_fitness(individual, X, y, max_individual_size):
                     individual.phenotype,
                     {
                         **{f"xi_{k}": X[i][k] for k in range(max_individual_size)},
-                        **{f"xj_{k}": X[j][k] for k in range(max_individual_size)},
+                        **{f"yj_{k}": X[j][k] for k in range(max_individual_size)},
                     },
                 )
-                distances[i, j] = distance
-                distances[j, i] = distance
+                matrix_distances[i, j] = distance
+                matrix_distances[j, i] = distance
 
         clustering = AgglomerativeClustering(n_clusters=len(set(y)), metric="precomputed", linkage="average")
-        labels = clustering.fit_predict(distances)
+        labels = clustering.fit_predict(matrix_distances)
 
         individual.fitness = v_measure_score(y, labels)
     except ZeroDivisionError:
@@ -130,6 +153,12 @@ def safe_eval(expression, vars_dict):
         return 0
 
 
+def tournament_selection(population, k):
+    selected = random.sample(population, k)
+    selected.sort(reverse=True)
+    return selected[0]
+
+
 def crossover(parent1, parent2, crossover_prob):
     # if random.random() < crossover_prob:
     #     genotype1 = []
@@ -144,23 +173,23 @@ def crossover(parent1, parent2, crossover_prob):
     #             genotype1.append(gene1)
     #             genotype2.append(gene2)
 
-    #     return Individual(genotype1), Individual(genotype2)
+    #     return Individual(genotype1,  depth=parent1.max_depth + 1), Individual(genotype2,  depth=parent1.max_depth + 1)
+
+    if random.random() < crossover_prob:
+        i = random.randrange(0, len(parent1.genotype) - 1)
+        j = random.randrange(i + 1, len(parent1.genotype))
+
+        genotype1 = parent1.genotype[:i] + parent2.genotype[i:j] + parent1.genotype[j:]
+        genotype2 = parent2.genotype[:i] + parent1.genotype[i:j] + parent2.genotype[j:]
+        return Individual(genotype1,  depth=parent1.max_depth + 1), Individual(genotype2,  depth=parent1.max_depth + 1)
 
     # if random.random() < crossover_prob:
     #     i = random.randrange(0, len(parent1.genotype) - 1)
-    #     j = random.randrange(i + 1, len(parent1.genotype))
 
-    #     genotype1 = parent1.genotype[:i] + parent2.genotype[i:j] + parent1.genotype[j:]
-    #     genotype2 = parent2.genotype[:i] + parent1.genotype[i:j] + parent2.genotype[j:]
-    #     return Individual(genotype1), Individual(genotype2)
+    #     genotype1 = parent1.genotype[:i] + parent2.genotype[i:]
+    #     genotype2 = parent2.genotype[:i] + parent1.genotype[i:] 
+    #     return Individual(genotype1, depth=parent1.max_depth + 1), Individual(genotype2, depth=parent1.max_depth + 1)
 
-    if random.random() < crossover_prob:
-        i = random.randrange(0, len(parent1.genotype))
-
-        genotype1 = parent1.genotype[:i] + parent2.genotype[i:]
-        genotype2 = parent2.genotype[:i] + parent1.genotype[i:]
-        return Individual(genotype1, depth=parent1.max_depth + 1), Individual(genotype2, depth=parent1.max_depth + 1)
-    
     return parent1, parent2
 
 
@@ -177,29 +206,54 @@ def mutate(individual, mutation_prob):
     return individual
 
 
-def genetic_programming(
-    X, y, population_size, generations, crossover_prob, mutation_prob, elitism, max_individual_size, use_multithreading
-):  
-    population = generate_initial_population(population_size, max_individual_size)
-
+def population_evaluate_fitness(population, X, y, max_individual_size, use_multithreading=False):
     if use_multithreading:
+        # Fitness
         with ProcessPoolExecutor() as executor:
             futures = {executor.submit(evaluate_fitness, ind, X, y, max_individual_size): ind for ind in population}
             for future in as_completed(futures):
                 ind = futures[future]
                 ind.fitness = future.result()
+
+        # Fitness sharing
+        with ProcessPoolExecutor() as executor:
+            futures = {executor.submit(fitness_sharing, ind, population): ind for ind in population if ind.fitness != 0}
+            for future in as_completed(futures):
+                ind = futures[future]
+                nc = future.result()
+                ind.fitness /= nc if nc != 0 else 1
     else:
+        # Fitness
         for ind in population:
             ind.fitness = evaluate_fitness(ind, X, y, max_individual_size)
 
+        # Fitness sharing
+        for ind in population:
+            if ind.fitness != 0:
+                nc = fitness_sharing(ind, population) 
+                ind.fitness /= nc if nc != 0 else 1
+
+
+def genetic_programming(
+    X,
+    y,
+    population_size,
+    generations,
+    crossover_prob,
+    mutation_prob,
+    elitism,
+    max_individual_size,
+    use_multithreading,
+    k,
+):
+    population = generate_initial_population(population_size, max_individual_size)
+
+    population_evaluate_fitness(population, X, y, max_individual_size, use_multithreading)
+
     for generation in range(generations):
-
-        # for ind in population:
-        #     print(ind.phenotype)
-        #     print()
-
         # for ind in population:
         #     print(ind.genotype)
+
 
         best_fitness = float(np.max([ind.fitness for ind in population if ind.fitness is not None]))
         avg_fitness = float(np.mean([ind.fitness for ind in population if ind.fitness is not None]))
@@ -207,37 +261,23 @@ def genetic_programming(
 
         new_population = []
         for _ in range(len(population) // 2):
-            parent1 = tournament_selection(population)
-            parent2 = tournament_selection(population)
+            parent1 = tournament_selection(population, k)
+            parent2 = tournament_selection(population, k)
             child1, child2 = crossover(parent1, parent2, crossover_prob)
+
             new_population.extend([mutate(child1, mutation_prob), mutate(child2, mutation_prob)])
 
         if elitism:
             population.sort(reverse=True)
             new_population = population[:2] + new_population
 
-        if use_multithreading:
-            with ProcessPoolExecutor() as executor:
-                futures = {executor.submit(evaluate_fitness, ind, X, y, max_individual_size): ind for ind in new_population}
-                for future in as_completed(futures):
-                    ind = futures[future]
-                    ind.fitness = future.result()
-        else:
-            for ind in new_population:
-                ind.fitness = evaluate_fitness(ind, X, y, max_individual_size)
-            
+        population_evaluate_fitness(new_population, X, y, max_individual_size, use_multithreading)
+
         new_population.sort(reverse=True)
-        population = new_population[: population_size]
+        population = new_population[:population_size]
 
     population.sort(reverse=True)
     return population[0]
-
-
-def tournament_selection(population):
-    k = 3
-    selected = random.sample(population, k)
-    selected.sort(reverse=True)
-    return selected[0]
 
 
 def test(X, y, population, max_individual_size, use_multithreading):
@@ -251,7 +291,7 @@ def test(X, y, population, max_individual_size, use_multithreading):
         for ind in population:
             ind.fitness = evaluate_fitness(ind, X, y, max_individual_size)
 
-    best_fitness = float(np.max(population))
+    best_fitness = np.max(population)
     print(f"Geração test: Melhor {best_fitness.fitness:.3}")
 
 
@@ -272,6 +312,10 @@ def main():
         default=0,
         help="Usar múltiplas threads para avaliação de fitness (0 para não, qualquer outro número para sim)",
     )
+    parser.add_argument(
+        "--tournament_k", type=int, default=3, help="Número de indivíduos a serem selecionados no torneio"
+    )
+
     args = parser.parse_args()
 
     if args.seed is not None:
@@ -304,6 +348,7 @@ def main():
         args.elitism != 0,  # Convert the integer to a boolean
         args.individual_size,
         args.use_multithreading != 0,  # Convert the integer to a boolean
+        args.tournament_k,
     )
 
     # Carregar os dados de teste
@@ -318,7 +363,7 @@ def main():
     X_test = np.array(X_test)
     y_test = np.array(y_test)
 
-    # test(X_test, y_test, [best_individual], args.individual_size, args.use_multithreading != 0)
+    test(X_test, y_test, [best_individual], args.individual_size, args.use_multithreading != 0)
 
 
 if __name__ == "__main__":
