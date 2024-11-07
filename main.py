@@ -10,63 +10,58 @@ from sklearn.metrics import v_measure_score
 
 # Constants
 OPERATOR = ["+", "-", "*", "/"]
-CONSTANT = [f"{number:.3}" for number in np.arange(-2, 2, 0.4)]
 LEN_OPERATOR = len(OPERATOR)
-LEN_CONSTANT = len(CONSTANT)
 
 
 class Individual:
-    def __init__(self, genotype=None, depth=1):
+    def __init__(self, genotype=None, depth=5, terminal_size=1):
         self.fitness = None
-        self.depth = depth - 1
-        self.max_depth = self.depth
-        self.genotype = self.genotype_vector(genotype)
-        self.phenotype = self.phenotype_expr(self.genotype)
+        self.genotype_len = 2**depth - 1
+        self.genotype = self.genotype_vector(genotype, terminal_size)
+        self.phenotype = self.phenotype_expr()
 
-    def update_genotype(self, i, value):
+    def update_genotype(self, genotype):
         self.fitness = None
-        self.depth = self.max_depth
-        self.genotype[i] = value
-        self.phenotype = self.phenotype_expr(self.genotype)
+        self.genotype = genotype
+        self.phenotype = self.phenotype_expr()
 
-    def genotype_vector(self, genotype=None):
+    def genotype_vector(self, genotype=None, terminal=None):
         if genotype is not None:
-            return genotype
+            return np.array(genotype)
 
-        g_vector = []
+        genotype_vector = np.ones((self.genotype_len,), dtype=np.int8)
 
-        for _ in range(self.depth + 1):
-            g_vector.append(random.randrange(0, LEN_CONSTANT))
-            g_vector.append(random.randrange(0, LEN_OPERATOR))
+        for i in range(self.genotype_len):
+            if i >= self.genotype_len // 2:
+                genotype_vector[i] = random.randrange(0, terminal)
+            else:
+                genotype_vector[i] = random.randrange(0, LEN_OPERATOR)
 
-        return g_vector
+        return genotype_vector
 
-    def phenotype_expr(self, genotype):
-        genotype = genotype[::-1]
+    def get_expr_node(self, i):
+        if i < self.genotype_len // 2:
+            op = self.operator(self.genotype[i])
+            right = self.get_expr_node(2 * i + 1)
+            left = self.get_expr_node(2 * i + 2)
 
-        phenotype = self.terminal(genotype[0:2])
-        for i in range(2, len(genotype), 2):
-            phenotype = self.terminal(genotype[i : i + 2]) + " + " + phenotype
+            if op == "/":
+                return f"{left} {op} ({right} + 1e-6)"
 
-        return phenotype
+            return f"({left} {op} {right})"
+        else:
+            return self.terminal(i)
 
-    def terminal(self, numbers):
-        index = self.depth
-        self.depth -= 1
+    def phenotype_expr(self):
 
-        const = self.constant(numbers[1])
-        op = self.operator(numbers[0])
+        return self.get_expr_node(0)
 
-        if op == "/":
-            return f"{const} {op} (abs(xi_{index} - yj_{index}) + 1e-6)"
-
-        return f"{const} {op} abs(xi_{index} - yj_{index})"
+    def terminal(self, i):
+        index = self.genotype[i]
+        return f"abs(x_{index} - y_{index})"
 
     def operator(self, number):
         return OPERATOR[number]
-
-    def constant(self, number):
-        return CONSTANT[number]
 
     def __gt__(self, other):
         if self.fitness == None:
@@ -78,8 +73,8 @@ class Individual:
         return self.fitness > other.fitness
 
 
-def generate_initial_population(size, individual_size):
-    return [Individual(depth=individual_size) for _ in range(size)]
+def generate_initial_population(size, depth, individual_size):
+    return [Individual(depth=depth, terminal_size=individual_size) for _ in range(size)]
 
 
 def share_distance(individual1, individual2):
@@ -92,8 +87,8 @@ def share_distance(individual1, individual2):
     return distance
 
 
-
-def fitness_sharing(individual, population, share_threshold=9):
+def fitness_sharing(individual, population):
+    share_threshold = individual.genotype_len // 2
 
     sum_sh = 0
     for ind in population:
@@ -105,7 +100,7 @@ def fitness_sharing(individual, population, share_threshold=9):
     return sum_sh
 
 
-def evaluate_fitness(individual, X, y, max_individual_size):
+def evaluate_fitness(individual, X, y, individual_size):
     try:
         # Check if need calc individual fitness
         if individual.fitness != None:
@@ -119,8 +114,8 @@ def evaluate_fitness(individual, X, y, max_individual_size):
                 distance = safe_eval(
                     individual.phenotype,
                     {
-                        **{f"xi_{k}": X[i][k] for k in range(max_individual_size)},
-                        **{f"yj_{k}": X[j][k] for k in range(max_individual_size)},
+                        **{f"x_{k}": X[i][k] for k in range(individual_size)},
+                        **{f"y_{k}": X[j][k] for k in range(individual_size)},
                     },
                 )
                 matrix_distances[i, j] = distance
@@ -159,58 +154,57 @@ def tournament_selection(population, k):
     return selected[0]
 
 
-def crossover(parent1, parent2, crossover_prob):
-    # if random.random() < crossover_prob:
-    #     genotype1 = []
-    #     genotype2 = []
-        
-    #     # Para cada gene, decida se será trocado ou não com base na probabilidade de 0.5
-    #     for gene1, gene2 in zip(parent1.genotype, parent2.genotype):
-    #         if random.random() < 0.5:  # Probabilidade de 50% de trocar os genes
-    #             genotype1.append(gene2)
-    #             genotype2.append(gene1)
-    #         else:
-    #             genotype1.append(gene1)
-    #             genotype2.append(gene2)
-
-    #     return Individual(genotype1,  depth=parent1.max_depth + 1), Individual(genotype2,  depth=parent1.max_depth + 1)
-
+def crossover(parent1, parent2, crossover_prob, depth, individual_size):
     if random.random() < crossover_prob:
-        i = random.randrange(0, len(parent1.genotype) - 1)
-        j = random.randrange(i + 1, len(parent1.genotype))
 
-        genotype1 = parent1.genotype[:i] + parent2.genotype[i:j] + parent1.genotype[j:]
-        genotype2 = parent2.genotype[:i] + parent1.genotype[i:j] + parent2.genotype[j:]
-        return Individual(genotype1,  depth=parent1.max_depth + 1), Individual(genotype2,  depth=parent1.max_depth + 1)
+        swap_index = [random.randrange(0, parent1.genotype_len)]
+        genotype_len = parent1.genotype_len
+        genotype1 = parent1.genotype
+        genotype2 = parent2.genotype
 
-    # if random.random() < crossover_prob:
-    #     i = random.randrange(0, len(parent1.genotype) - 1)
+        while len(swap_index) > 0:
+            i = swap_index.pop(0)
 
-    #     genotype1 = parent1.genotype[:i] + parent2.genotype[i:]
-    #     genotype2 = parent2.genotype[:i] + parent1.genotype[i:] 
-    #     return Individual(genotype1, depth=parent1.max_depth + 1), Individual(genotype2, depth=parent1.max_depth + 1)
+            if 2 * i + 2 < genotype_len:
+                swap_index.append(2 * i + 1)
+                swap_index.append(2 * i + 2)
+
+            genotype1[i], genotype2[i] = genotype2[i], genotype1[i]
+
+        return Individual(genotype1, depth, individual_size), Individual(genotype2, depth, individual_size)
 
     return parent1, parent2
 
 
-def mutate(individual, mutation_prob):
+def mutate(individual, mutation_prob, num_terminal):
     if random.random() < mutation_prob:
-        i = random.randrange(0, len(individual.genotype))
-        if i % 2 == 0:
-            new_value = random.randrange(0, LEN_CONSTANT)
-        else:
-            new_value = random.randrange(0, LEN_OPERATOR)
 
-        new_individual = Individual(individual.genotype, depth=individual.max_depth + 1)
-        new_individual.update_genotype(i, new_value)
+        swap_index = [random.randrange(0, individual.genotype_len)]
+        genotype_len = individual.genotype_len
+        genotype = individual.genotype
+
+        while len(swap_index) > 0:
+            i = swap_index.pop(0)
+
+            if 2 * i + 2 < genotype_len:
+                swap_index.append(2 * i + 1)
+                swap_index.append(2 * i + 2)
+
+            if i >= individual.genotype_len // 2:
+                genotype[i] = random.randrange(0, num_terminal)
+            else:
+                genotype[i] = random.randrange(0, LEN_OPERATOR)
+
+        individual.update_genotype(genotype)
+
     return individual
 
 
-def population_evaluate_fitness(population, X, y, max_individual_size, use_multithreading=False):
+def population_evaluate_fitness(population, X, y, individual_size, use_multithreading=False):
     if use_multithreading:
         # Fitness
         with ProcessPoolExecutor() as executor:
-            futures = {executor.submit(evaluate_fitness, ind, X, y, max_individual_size): ind for ind in population}
+            futures = {executor.submit(evaluate_fitness, ind, X, y, individual_size): ind for ind in population}
             for future in as_completed(futures):
                 ind = futures[future]
                 ind.fitness = future.result()
@@ -225,12 +219,12 @@ def population_evaluate_fitness(population, X, y, max_individual_size, use_multi
     else:
         # Fitness
         for ind in population:
-            ind.fitness = evaluate_fitness(ind, X, y, max_individual_size)
+            ind.fitness = evaluate_fitness(ind, X, y, individual_size)
 
         # Fitness sharing
         for ind in population:
             if ind.fitness != 0:
-                nc = fitness_sharing(ind, population) 
+                nc = fitness_sharing(ind, population)
                 ind.fitness /= nc if nc != 0 else 1
 
 
@@ -242,18 +236,21 @@ def genetic_programming(
     crossover_prob,
     mutation_prob,
     elitism,
-    max_individual_size,
+    depth,
+    individual_size,
     use_multithreading,
     k,
 ):
-    population = generate_initial_population(population_size, max_individual_size)
+    population = generate_initial_population(population_size, depth, individual_size)
 
-    population_evaluate_fitness(population, X, y, max_individual_size, use_multithreading)
+    population_evaluate_fitness(population, X, y, individual_size, use_multithreading)
 
+    # for ind in population:
+    #     print(ind.genotype)
+    #     print(ind.phenotype)
+    #     print()
+    # return
     for generation in range(generations):
-        # for ind in population:
-        #     print(ind.genotype)
-
 
         best_fitness = float(np.max([ind.fitness for ind in population if ind.fitness is not None]))
         avg_fitness = float(np.mean([ind.fitness for ind in population if ind.fitness is not None]))
@@ -263,58 +260,61 @@ def genetic_programming(
         for _ in range(len(population) // 2):
             parent1 = tournament_selection(population, k)
             parent2 = tournament_selection(population, k)
-            child1, child2 = crossover(parent1, parent2, crossover_prob)
+            child1, child2 = crossover(parent1, parent2, crossover_prob, depth, individual_size)
+            child1 = mutate(child1, mutation_prob, individual_size)
+            child2 = mutate(child2, mutation_prob, individual_size)
 
-            new_population.extend([mutate(child1, mutation_prob), mutate(child2, mutation_prob)])
+            new_population.extend([child1, child2])
 
         if elitism:
             population.sort(reverse=True)
             new_population = population[:2] + new_population
 
-        population_evaluate_fitness(new_population, X, y, max_individual_size, use_multithreading)
-
         new_population.sort(reverse=True)
         population = new_population[:population_size]
 
+        population_evaluate_fitness(new_population, X, y, individual_size, use_multithreading)
     population.sort(reverse=True)
     return population[0]
 
 
-def test(X, y, population, max_individual_size, use_multithreading):
+def test(X, y, population, individual_size, use_multithreading):
     if use_multithreading:
         with ProcessPoolExecutor() as executor:
-            futures = {executor.submit(evaluate_fitness, ind, X, y, max_individual_size): ind for ind in population}
+            futures = {executor.submit(evaluate_fitness, ind, X, y, individual_size): ind for ind in population}
             for future in as_completed(futures):
                 ind = futures[future]
                 ind.fitness = future.result()
     else:
         for ind in population:
-            ind.fitness = evaluate_fitness(ind, X, y, max_individual_size)
+            ind.fitness = evaluate_fitness(ind, X, y, individual_size)
 
     best_fitness = np.max(population)
     print(f"Geração test: Melhor {best_fitness.fitness:.3}")
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Configurações do algoritmo de programação genética")
-    parser.add_argument("--population_size", type=int, default=30, help="Tamanho da população")
-    parser.add_argument("--generations", type=int, default=30, help="Número de gerações")
-    parser.add_argument("--crossover_prob", type=float, default=0.9, help="Probabilidade de crossover")
-    parser.add_argument("--mutation_prob", type=float, default=0.05, help="Probabilidade de mutação")
-    parser.add_argument(
-        "--elitism", type=int, default=1, help="Se deve usar elitismo (0 para não, qualquer outro número para sim)"
-    )
-    parser.add_argument("--individual_size", type=int, help="Tamanho máximo dos indivíduos (tamanho de X_train)")
-    parser.add_argument("--seed", type=int, help="Semente para o gerador de números aleatórios")
-    parser.add_argument(
-        "--use_multithreading",
-        type=int,
-        default=0,
-        help="Usar múltiplas threads para avaliação de fitness (0 para não, qualquer outro número para sim)",
-    )
-    parser.add_argument(
-        "--tournament_k", type=int, default=3, help="Número de indivíduos a serem selecionados no torneio"
-    )
+    help_description = "Configurações do algoritmo de programação genética"
+    help_population_size = "Tamanho da população"
+    help_generations = "Número de gerações"
+    help_crossover_prob = "Probabilidade de crossover"
+    help_mutation_prob = "Probabilidade de mutação"
+    help_elitism = "Se deve usar elitismo (0 para não, qualquer outro número para sim)"
+    help_depth = "Tamanho máximo da árvores dos indivíduos"
+    help_seed = "Semente para o gerador de números aleatórios"
+    help_multithreading = "Usar múltiplas threads para avaliação de fitness (0 para não, qualquer valor para sim)"
+    help_tournament = "Número de indivíduos a serem selecionados no torneio"
+
+    parser = argparse.ArgumentParser(description=help_description)
+    parser.add_argument("--population_size", type=int, default=30, help=help_population_size)
+    parser.add_argument("--generations", type=int, default=30, help=help_generations)
+    parser.add_argument("--crossover_prob", type=float, default=0.9, help=help_crossover_prob)
+    parser.add_argument("--mutation_prob", type=float, default=0.05, help=help_mutation_prob)
+    parser.add_argument("--elitism", type=int, default=1, help=help_elitism)
+    parser.add_argument("--depth", type=int, help=help_depth)
+    parser.add_argument("--seed", type=int, help=help_seed)
+    parser.add_argument("--multithreading", type=int, default=0, help=help_multithreading)
+    parser.add_argument("--tournament", type=int, default=3, help=help_tournament)
 
     args = parser.parse_args()
 
@@ -327,12 +327,14 @@ def main():
 
     # Carregar os dados de treino
     X_train, y_train = [], []
-    with open("data/breast_cancer_coimbra_test.csv", newline="") as csv_file:
+    with open("data/breast_cancer_coimbra_train.csv", newline="") as csv_file:
         reader = csv.DictReader(csv_file)
         for row in reader:
             values = list(row.values())
             X_train.append([float(v) for v in values[:-1]])
             y_train.append(float(values[-1]))
+
+    individual_size = len(X_train[0])
 
     X_train = np.array(X_train)
     y_train = np.array(y_train)
@@ -346,9 +348,10 @@ def main():
         args.crossover_prob,
         args.mutation_prob,
         args.elitism != 0,  # Convert the integer to a boolean
-        args.individual_size,
-        args.use_multithreading != 0,  # Convert the integer to a boolean
-        args.tournament_k,
+        args.depth,
+        individual_size,
+        args.multithreading != 0,  # Convert the integer to a boolean
+        args.tournament,
     )
 
     # Carregar os dados de teste
@@ -363,7 +366,7 @@ def main():
     X_test = np.array(X_test)
     y_test = np.array(y_test)
 
-    test(X_test, y_test, [best_individual], args.individual_size, args.use_multithreading != 0)
+    test(X_test, y_test, [best_individual], individual_size, args.multithreading != 0)
 
 
 if __name__ == "__main__":
