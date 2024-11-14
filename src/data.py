@@ -1,0 +1,43 @@
+import csv
+
+
+import numpy as np
+from sklearn.preprocessing import normalize
+
+DATASET_PATHS = {
+    "cancer": {"train": "data/breast_cancer_coimbra_train.csv", "test": "data/breast_cancer_coimbra_test.csv"},
+    "wine": {"train": "data/wineRed-train.csv", "test": "data/wineRed-test.csv"},
+}
+
+
+def load_data(dataset_name):
+    paths = DATASET_PATHS[dataset_name]
+
+    # Load training data
+    X_train, y_train = [], []
+    with open(paths["train"], newline="") as csv_file_train:
+        reader = csv.DictReader(csv_file_train)
+        for row in reader:
+            values = list(row.values())
+            X_train.append([float(v) for v in values[:-1]])
+            y_train.append(float(values[-1]) - 1)
+
+    X_train = np.array(X_train)
+    y_train = np.array(y_train)
+
+    # Load test data
+    X_test, y_test = [], []
+    with open(paths["test"], newline="") as csv_file_test:
+        reader = csv.DictReader(csv_file_test)
+        for row in reader:
+            values = list(row.values())
+            X_test.append([float(v) for v in values[:-1]])
+            y_test.append(float(values[-1]) - 1)
+
+    X_test = np.array(X_test)
+    y_test = np.array(y_test)
+
+    X_train_normalized = normalize(X_train, norm="l2")
+    X_test_normalized = normalize(X_test, norm="l2")
+
+    return X_train_normalized, y_train, X_test_normalized, y_test
