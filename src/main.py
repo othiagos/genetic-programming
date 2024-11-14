@@ -2,7 +2,7 @@ import argparse
 import csv
 import random
 import time
-from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from copy import deepcopy
 
 import numpy as np
@@ -14,6 +14,12 @@ from sklearn.preprocessing import normalize
 # Constants
 OPERATOR = ["+", "-", "*", "/"]
 LEN_OPERATOR = len(OPERATOR)
+
+DATASET_PATHS = {
+    "cancer": {"train": "data/breast_cancer_coimbra_train.csv", "test": "data/breast_cancer_coimbra_test.csv"},
+    "wine": {"train": "data/wineRed-train.csv", "test": "data/wineRed-test.csv"},
+}
+
 
 class Individual:
     def __init__(self, genotype=None, depth=5, terminal_size=1):
@@ -79,29 +85,34 @@ def generate_initial_population(size, depth, individual_size):
     return [Individual(depth=depth, terminal_size=individual_size) for _ in range(size)]
 
 
+def calculate_distance_matrix(X, individual, individual_size):
+    num_samples = len(X)
+    matrix_distances = np.zeros((num_samples, num_samples))
+    for i in range(num_samples):
+        for j in range(i + 1, num_samples):
+            distance = safe_eval(
+                individual.phenotype,
+                {
+                    **{f"x_{k}": X[i][k] for k in range(individual_size)},
+                    **{f"y_{k}": X[j][k] for k in range(individual_size)},
+                },
+            )
+            matrix_distances[i, j] = distance
+            matrix_distances[j, i] = distance
+
+    return matrix_distances
+
+
 def evaluate_fitness(individual, X, y, individual_size):
     try:
         if individual.fitness is not None:
             return individual.fitness
 
-        num_samples = len(X)
-        matrix_distances = np.zeros((num_samples, num_samples))
-        for i in range(num_samples):
-            for j in range(i + 1, num_samples):
-                distance = safe_eval(
-                    individual.phenotype,
-                    {
-                        **{f"x_{k}": X[i][k] for k in range(individual_size)},
-                        **{f"y_{k}": X[j][k] for k in range(individual_size)},
-                    },
-                )
-                matrix_distances[i, j] = distance
-                matrix_distances[j, i] = distance
-
+        matrix_distances = calculate_distance_matrix(X, individual, individual_size)
         clustering = AgglomerativeClustering(n_clusters=len(set(y)), metric="precomputed", linkage="complete")
-        y_pred = clustering.fit_predict(matrix_distances[:num_samples, :num_samples])
+        y_pred = clustering.fit_predict(matrix_distances)
 
-        individual.fitness = v_measure_score(y, y_pred)
+        individual.fitness = v_measure_score(y, y_pred, beta=5.0)
 
     except ZeroDivisionError:
         print("div")
@@ -186,9 +197,8 @@ def mutate(individual, mutation_prob, num_terminal):
     return individual
 
 
-def population_evaluate_fitness(population, X, y, individual_size, use_multithreading=False):
-    if use_multithreading:
-        # Fitness
+def population_evaluate_fitness(population, X, y, individual_size, multithreading=False):
+    if multithreading:
         with ProcessPoolExecutor() as executor:
             futures = {executor.submit(evaluate_fitness, ind, X, y, individual_size): ind for ind in population}
             for future in as_completed(futures):
@@ -196,7 +206,6 @@ def population_evaluate_fitness(population, X, y, individual_size, use_multithre
                 ind.fitness = future.result()
 
     else:
-        # Fitness
         for ind in population:
             ind.fitness = evaluate_fitness(ind, X, y, individual_size)
 
@@ -232,81 +241,83 @@ def crowding(parents, children):
 
 def process_crossover_and_crowding(X, y, parent1, parent2, mutation_prob, depth, individual_size):
     child1, child2 = crossover(parent1, parent2, mutation_prob, depth, individual_size)
-    
+
     child1.fitness = evaluate_fitness(child1, X, y, individual_size)
     child2.fitness = evaluate_fitness(child2, X, y, individual_size)
-    
+
     return crowding((parent1, parent2), (child1, child2))
 
 
-def genetic_programming(
-    X,
-    y,
-    population_size,
-    generations,
-    mutation_prob,
-    depth,
-    individual_size,
-    use_multithreading,
-    k,
-):  
+def new_generation(X, y, population, k, mutation_prob, depth, individual_size, multithreading=False):
+    if multithreading:
+        with ProcessPoolExecutor() as executor:
+            futures = []
+            new_population = []
+            for _ in range(len(population) // 2):
+                parent1 = tournament_selection(population, k)
+                parent2 = tournament_selection(population, k)
+
+                args = (X, y, parent1, parent2, mutation_prob, depth, individual_size)
+                futures.append(executor.submit(process_crossover_and_crowding, *args))
+
+            for future in as_completed(futures):
+                best_individuals = future.result()
+                new_population.extend(best_individuals)
+
+        return new_population
+
+    new_population = []
+
+    for _ in range(len(population) // 2):
+        parent1 = tournament_selection(population, k)
+        parent2 = tournament_selection(population, k)
+
+        best_individuals = process_crossover_and_crowding(X, y, parent1, parent2, mutation_prob, depth, individual_size)
+        new_population.extend(best_individuals)
+
+    return new_population
+
+
+def genetic_programming_train(
+    X, y, population_size, generations, mutation_prob, depth, individual_size, multithreading, k
+):
     population = generate_initial_population(population_size, depth, individual_size)
 
     t0 = time.time()
-    population_evaluate_fitness(population, X, y, individual_size, use_multithreading)
+    population_evaluate_fitness(population, X, y, individual_size, multithreading)
 
     for generation in range(generations):
         # for ind in population:
-            # print(ind.genotype)
-            # print(ind.phenotype)
-            # print()
+        #     print(ind.genotype)
+        #     print(ind.phenotype)
+        #     print()
 
         best_fitness = float(np.max([ind.fitness for ind in population if ind.fitness is not None]))
         avg_fitness = float(np.mean([ind.fitness for ind in population if ind.fitness is not None]))
 
         gen_time = time.time() - t0
-        print(f"\nGeração {generation}: Melhor {best_fitness:.3f}, Média {avg_fitness:.3f}, Tempo: {gen_time:.3f}s", end="")
+        print(
+            f"\nGeração {generation}: Melhor {best_fitness:.3f}, Média {avg_fitness:.3f}, Tempo: {gen_time:.3f}s",
+            end="",
+        )
 
         t0 = time.time()
 
-        with ProcessPoolExecutor() as executor:
-            futures = []
-            for _ in range(len(population) // 2):
-                parent1 = tournament_selection(population, k)
-                parent2 = tournament_selection(population, k)
-
-                futures.append(
-                    executor.submit(
-                        process_crossover_and_crowding,
-                        X,
-                        y,
-                        parent1,
-                        parent2,
-                        mutation_prob,
-                        depth,
-                        individual_size,
-                    )
-                )
-
-            new_population = []
-            for future in as_completed(futures):
-                best_individuals = future.result()
-                new_population.extend(best_individuals)
-
+        new_population = new_generation(X, y, population, k, mutation_prob, depth, individual_size, multithreading)
         new_population.sort(reverse=True)
         population = new_population[:population_size]
 
-        population_evaluate_fitness(population, X, y, individual_size, use_multithreading)
+        population_evaluate_fitness(population, X, y, individual_size, multithreading)
     population.sort(reverse=True)
-    return population[0]
+    return population
 
 
-def test(X, y, population, individual_size, use_multithreading):
+def genetic_programming_test(X, y, population, individual_size, multithreading):
     for ind in population:
         ind.fitness = None
 
-    if use_multithreading:
-        with ThreadPoolExecutor() as executor:
+    if multithreading:
+        with ProcessPoolExecutor() as executor:
             futures = {executor.submit(evaluate_fitness, ind, X, y, individual_size): ind for ind in population}
             for future in as_completed(futures):
                 ind = futures[future]
@@ -315,11 +326,45 @@ def test(X, y, population, individual_size, use_multithreading):
         for ind in population:
             ind.fitness = evaluate_fitness(ind, X, y, individual_size)
 
-    best_fitness = np.max(population)
-    print()
-    print(best_fitness.genotype)
-    print(best_fitness.phenotype)
-    print(f"Geração test: Melhor {best_fitness.fitness:.3f}")
+    best_fitness = float(np.max([ind.fitness for ind in population if ind.fitness is not None]))
+    avg_fitness = float(np.mean([ind.fitness for ind in population if ind.fitness is not None]))
+
+    print(f"\nGeração test: Melhor {best_fitness:.3f}, Média {avg_fitness:.3f}")
+
+
+def load_data(dataset_name):
+    paths = DATASET_PATHS[dataset_name]
+
+    # Load training data
+    X_train, y_train = [], []
+    with open(paths["train"], newline="") as csv_file_train:
+        reader = csv.DictReader(csv_file_train)
+        for row in reader:
+            values = list(row.values())
+            X_train.append([float(v) for v in values[:-1]])
+            y_train.append(float(values[-1]) - 1)
+
+    X_train = np.array(X_train)
+    y_train = np.array(y_train)
+
+    # Load test data
+    X_test, y_test = [], []
+    with open(paths["test"], newline="") as csv_file_test:
+        reader = csv.DictReader(csv_file_test)
+        for row in reader:
+            values = list(row.values())
+            X_test.append([float(v) for v in values[:-1]])
+            y_test.append(float(values[-1]) - 1)
+
+    X_test = np.array(X_test)
+    y_test = np.array(y_test)
+
+    return X_train, y_train, X_test, y_test
+
+
+def set_seed(seed):
+    random.seed(seed)
+    np.random.seed(seed)
 
 
 def main():
@@ -331,6 +376,7 @@ def main():
     help_seed = "Semente para o gerador de números aleatórios"
     help_multithreading = "Usar múltiplas threads para avaliação de fitness (0 para não, qualquer valor para sim)"
     help_tournament = "Número de indivíduos a serem selecionados no torneio"
+    help_dataset = "Escolha da base de dados: 'cancer' ou 'wine'"
 
     parser = argparse.ArgumentParser(description=help_description)
     parser.add_argument("--population_size", type=int, default=30, help=help_population_size)
@@ -340,34 +386,19 @@ def main():
     parser.add_argument("--seed", type=int, help=help_seed)
     parser.add_argument("--multithreading", type=int, default=0, help=help_multithreading)
     parser.add_argument("--tournament", type=int, default=3, help=help_tournament)
+    parser.add_argument("--dataset", type=str, choices=["cancer", "wine"], required=True, help=help_dataset)
 
     args = parser.parse_args()
 
-    if args.seed is not None:
-        random.seed(args.seed)
-        np.random.seed(args.seed)
-    else:
-        random.seed(int(time.time()))
-        np.random.seed(int(time.time()))
+    set_seed(args.seed)
 
-    # Carregar os dados de treino
-    X_train, y_train = [], []
-    with open("data/breast_cancer_coimbra_train.csv", newline="") as csv_file_train:
-        # with open("data/wineRed-train.csv", newline="") as csv_file_train:
-        reader = csv.DictReader(csv_file_train)
-        for row in reader:
-            values = list(row.values())
-            X_train.append([float(v) for v in values[:-1]])
-            y_train.append(float(values[-1]) - 1)
-
+    X_train, y_train, X_test, y_test = load_data(args.dataset)
     individual_size = len(X_train[0])
 
-    X_train = np.array(X_train)
-    y_train = np.array(y_train)
-
     X_train_normalized = normalize(X_train, norm="max")
+    X_test_normalized = normalize(X_test, norm="max")
 
-    best_individual = genetic_programming(
+    train_population = genetic_programming_train(
         X_train_normalized,
         y_train,
         args.population_size,
@@ -375,26 +406,11 @@ def main():
         args.mutation_prob,
         args.depth,
         individual_size,
-        args.multithreading != 0,  # Convert the integer to a boolean
+        args.multithreading != 0,
         args.tournament,
     )
 
-    # Carregar os dados de teste
-    X_test, y_test = [], []
-    with open("data/breast_cancer_coimbra_test.csv", newline="") as csv_file_test:
-        # with open("data/wineRed-test.csv", newline="") as csv_file_test:
-        reader = csv.DictReader(csv_file_test)
-        for row in reader:
-            values = list(row.values())
-            X_test.append([float(v) for v in values[:-1]])
-            y_test.append(float(values[-1]) - 1)
-
-    X_test = np.array(X_test)
-    y_test = np.array(y_test)
-
-    X_test_normalized = normalize(X_test, norm="max")
-
-    test(X_test_normalized, y_test, [best_individual], individual_size, args.multithreading != 0)
+    genetic_programming_test(X_test_normalized, y_test, train_population, individual_size, args.multithreading != 0)
 
 
 if __name__ == "__main__":
