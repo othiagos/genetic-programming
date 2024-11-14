@@ -2,7 +2,7 @@ import argparse
 import csv
 import random
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
 from copy import deepcopy
 
 import numpy as np
@@ -14,8 +14,6 @@ from sklearn.preprocessing import normalize
 # Constants
 OPERATOR = ["+", "-", "*", "/"]
 LEN_OPERATOR = len(OPERATOR)
-
-fitness_cache = {}
 
 class Individual:
     def __init__(self, genotype=None, depth=5, terminal_size=1):
@@ -81,39 +79,9 @@ def generate_initial_population(size, depth, individual_size):
     return [Individual(depth=depth, terminal_size=individual_size) for _ in range(size)]
 
 
-def share_distance(individual1, individual2):
-    distance = 0
-
-    for i in range(len(individual1.genotype)):
-        if individual1.genotype[i] != individual2.genotype[i]:
-            distance += 1
-
-    return distance
-
-
-def fitness_sharing(individual, population):
-    share_threshold = 3
-
-    sum_sh = 1
-    for ind in population:
-        diff = share_distance(individual, ind)
-
-        if diff < share_threshold:
-            sum_sh += 1 - (diff / share_threshold)
-
-    return sum_sh
-
-
 def evaluate_fitness(individual, X, y, individual_size):
     try:
         if individual.fitness is not None:
-            return individual.fitness
-        
-        genotype_tuple = tuple(individual.genotype)  # Converta o genótipo para uma tupla (hashável)
-
-        # Verifique se o fitness já foi calculado para este genótipo
-        if genotype_tuple in fitness_cache:
-            individual.fitness = fitness_cache[genotype_tuple]
             return individual.fitness
 
         num_samples = len(X)
@@ -134,7 +102,6 @@ def evaluate_fitness(individual, X, y, individual_size):
         y_pred = clustering.fit_predict(matrix_distances[:num_samples, :num_samples])
 
         individual.fitness = v_measure_score(y, y_pred)
-        fitness_cache[genotype_tuple] = individual.fitness
 
     except ZeroDivisionError:
         print("div")
@@ -171,32 +138,28 @@ def tournament_selection(population, k):
     return best
 
 
-def crossover(parent1, parent2, crossover_prob, mutation_prob, depth, individual_size):
-    if random.random() < crossover_prob:
+def crossover(parent1, parent2, mutation_prob, depth, individual_size):
+    swap_index = [random.randrange(0, parent1.genotype_len)]
+    genotype_len = parent1.genotype_len
+    genotype1 = deepcopy(parent1.genotype)
+    genotype2 = deepcopy(parent2.genotype)
 
-        swap_index = [random.randrange(0, parent1.genotype_len)]
-        genotype_len = parent1.genotype_len
-        genotype1 = deepcopy(parent1.genotype)
-        genotype2 = deepcopy(parent2.genotype)
+    while len(swap_index) > 0:
+        i = swap_index.pop(0)
 
-        while len(swap_index) > 0:
-            i = swap_index.pop(0)
+        if 2 * i + 2 < genotype_len:
+            swap_index.append(2 * i + 1)
+            swap_index.append(2 * i + 2)
 
-            if 2 * i + 2 < genotype_len:
-                swap_index.append(2 * i + 1)
-                swap_index.append(2 * i + 2)
+        genotype1[i], genotype2[i] = genotype2[i], genotype1[i]
 
-            genotype1[i], genotype2[i] = genotype2[i], genotype1[i]
+    child1 = Individual(genotype1, depth, individual_size)
+    child2 = Individual(genotype2, depth, individual_size)
 
-        child1 = Individual(genotype1, depth, individual_size)
-        child2 = Individual(genotype2, depth, individual_size)
+    child1 = mutate(child1, mutation_prob, individual_size)
+    child2 = mutate(child2, mutation_prob, individual_size)
 
-        child1 = mutate(child1, mutation_prob, individual_size)
-        child2 = mutate(child2, mutation_prob, individual_size)
-
-        return child1, child2
-
-    return parent1, parent2
+    return child1, child2
 
 
 def mutate(individual, mutation_prob, num_terminal):
@@ -226,29 +189,16 @@ def mutate(individual, mutation_prob, num_terminal):
 def population_evaluate_fitness(population, X, y, individual_size, use_multithreading=False):
     if use_multithreading:
         # Fitness
-        with ThreadPoolExecutor() as executor:
+        with ProcessPoolExecutor() as executor:
             futures = {executor.submit(evaluate_fitness, ind, X, y, individual_size): ind for ind in population}
             for future in as_completed(futures):
                 ind = futures[future]
                 ind.fitness = future.result()
 
-        # Fitness sharing
-        # with ThreadPoolExecutor() as executor:
-        #     futures = {executor.submit(fitness_sharing, ind, population): ind for ind in population if ind.fitness != 0}
-        #     for future in as_completed(futures):
-        #         ind = futures[future]
-        #         nc = future.result()
-        #         ind.fitness /= nc
     else:
         # Fitness
         for ind in population:
             ind.fitness = evaluate_fitness(ind, X, y, individual_size)
-
-        # Fitness sharing
-        # for ind in population:
-        #     if ind.fitness != 0:
-        #         nc = fitness_sharing(ind, population)
-        #         ind.fitness /= nc
 
 
 def crowding(parents, children):
@@ -280,8 +230,8 @@ def crowding(parents, children):
     return best_Individuals
 
 
-def process_crossover_and_crowding(X, y, parent1, parent2, crossover_prob, mutation_prob, depth, individual_size):
-    child1, child2 = crossover(parent1, parent2, crossover_prob, mutation_prob, depth, individual_size)
+def process_crossover_and_crowding(X, y, parent1, parent2, mutation_prob, depth, individual_size):
+    child1, child2 = crossover(parent1, parent2, mutation_prob, depth, individual_size)
     
     child1.fitness = evaluate_fitness(child1, X, y, individual_size)
     child2.fitness = evaluate_fitness(child2, X, y, individual_size)
@@ -294,9 +244,7 @@ def genetic_programming(
     y,
     population_size,
     generations,
-    crossover_prob,
     mutation_prob,
-    elitism,
     depth,
     individual_size,
     use_multithreading,
@@ -309,9 +257,9 @@ def genetic_programming(
 
     for generation in range(generations):
         # for ind in population:
-        #     print(ind.genotype)
-        #     print(ind.phenotype)
-        #     print()
+            # print(ind.genotype)
+            # print(ind.phenotype)
+            # print()
 
         best_fitness = float(np.max([ind.fitness for ind in population if ind.fitness is not None]))
         avg_fitness = float(np.mean([ind.fitness for ind in population if ind.fitness is not None]))
@@ -321,7 +269,7 @@ def genetic_programming(
 
         t0 = time.time()
 
-        with ThreadPoolExecutor() as executor:
+        with ProcessPoolExecutor() as executor:
             futures = []
             for _ in range(len(population) // 2):
                 parent1 = tournament_selection(population, k)
@@ -334,7 +282,6 @@ def genetic_programming(
                         y,
                         parent1,
                         parent2,
-                        crossover_prob,
                         mutation_prob,
                         depth,
                         individual_size,
@@ -379,9 +326,7 @@ def main():
     help_description = "Configurações do algoritmo de programação genética"
     help_population_size = "Tamanho da população"
     help_generations = "Número de gerações"
-    help_crossover_prob = "Probabilidade de crossover"
     help_mutation_prob = "Probabilidade de mutação"
-    help_elitism = "Se deve usar elitismo (0 para não, qualquer outro número para sim)"
     help_depth = "Tamanho máximo da árvores dos indivíduos"
     help_seed = "Semente para o gerador de números aleatórios"
     help_multithreading = "Usar múltiplas threads para avaliação de fitness (0 para não, qualquer valor para sim)"
@@ -390,9 +335,7 @@ def main():
     parser = argparse.ArgumentParser(description=help_description)
     parser.add_argument("--population_size", type=int, default=30, help=help_population_size)
     parser.add_argument("--generations", type=int, default=30, help=help_generations)
-    parser.add_argument("--crossover_prob", type=float, default=0.9, help=help_crossover_prob)
     parser.add_argument("--mutation_prob", type=float, default=0.05, help=help_mutation_prob)
-    parser.add_argument("--elitism", type=int, default=1, help=help_elitism)
     parser.add_argument("--depth", type=int, help=help_depth)
     parser.add_argument("--seed", type=int, help=help_seed)
     parser.add_argument("--multithreading", type=int, default=0, help=help_multithreading)
@@ -429,9 +372,7 @@ def main():
         y_train,
         args.population_size,
         args.generations,
-        args.crossover_prob,
         args.mutation_prob,
-        args.elitism != 0,  # Convert the integer to a boolean
         args.depth,
         individual_size,
         args.multithreading != 0,  # Convert the integer to a boolean
