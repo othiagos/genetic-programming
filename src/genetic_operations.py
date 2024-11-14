@@ -1,6 +1,6 @@
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from copy import deepcopy
-from time import time
+from time import monotonic as time
 
 import numpy as np
 from numpy.random import choice, randint, random
@@ -203,14 +203,6 @@ def genetic_programming_test(X, y, population):
     for ind in population:
         ind.fitness = None
 
-    if args.multithreading:
-        with ProcessPoolExecutor() as executor:
-            futures = {executor.submit(evaluate_fitness, ind, X, y): ind for ind in population}
-            for future in as_completed(futures):
-                ind = futures[future]
-                ind.fitness = future.result()
-    else:
-        for ind in population:
-            ind.fitness = evaluate_fitness(ind, X, y)
+    population_evaluate_fitness(population, X, y)
 
     print_test_info(population, t0)

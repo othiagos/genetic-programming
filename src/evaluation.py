@@ -1,5 +1,6 @@
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
+import numexpr as ne
 import numpy as np
 from sklearn.cluster import AgglomerativeClustering
 from sklearn.metrics import v_measure_score
@@ -15,13 +16,9 @@ def calculate_distance_matrix(X, individual):
 
     for i in range(num_samples):
         for j in range(i + 1, num_samples):
-            distance = safe_eval(
-                individual.phenotype,
-                {
-                    **{f"x_{k}": X[i][k] for k in range(args.individual_size)},
-                    **{f"y_{k}": X[j][k] for k in range(args.individual_size)},
-                },
-            )
+            local_dict = {**args.precomputed_x_dicts[i], **args.precomputed_y_dicts[j]}
+
+            distance = safe_eval(individual.phenotype, local_dict)
             matrix_distances[i, j] = distance
             matrix_distances[j, i] = distance
 
@@ -40,7 +37,6 @@ def evaluate_fitness(individual, X, y):
         individual.fitness = v_measure_score(y, y_pred, beta=5.0)
 
     except ZeroDivisionError:
-        print("div")
         individual.fitness = 0
     except Exception as e:
         print(f"Erro na avaliação da fitness: {e}")
@@ -51,7 +47,7 @@ def evaluate_fitness(individual, X, y):
 
 def safe_eval(expression, vars_dict):
     try:
-        result = eval(expression, {}, vars_dict)
+        result = ne.evaluate(expression, vars_dict)
         if np.isfinite(result):
             return result
         else:
