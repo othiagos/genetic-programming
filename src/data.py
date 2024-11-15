@@ -1,6 +1,7 @@
 import csv
 
 import numpy as np
+from numpy import ndarray
 from sklearn.preprocessing import normalize
 
 from config import Config
@@ -13,7 +14,7 @@ DATASET_PATHS = {
 args = Config.get_args()
 
 
-def load_data(dataset_name):
+def load_data(dataset_name: str) -> tuple[ndarray, ndarray, ndarray, ndarray]:
     paths = DATASET_PATHS[dataset_name]
 
     # Load training data

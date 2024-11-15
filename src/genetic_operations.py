@@ -3,6 +3,7 @@ from copy import deepcopy
 from time import monotonic as time
 
 import numpy as np
+from numpy import ndarray
 from numpy.random import choice, randint, random
 from scipy.spatial.distance import cosine
 
@@ -13,11 +14,11 @@ from individual import Individual
 args = Config.get_args()
 
 
-def generate_initial_population(size):
+def generate_initial_population(size: int) -> list[Individual]:
     return [Individual(depth=args.depth, individual_size=args.individual_size) for _ in range(size)]
 
 
-def tournament_selection(population, k):
+def tournament_selection(population: list[Individual], k: int) -> Individual:
     if k > len(population):
         k = len(population)
 
@@ -28,7 +29,7 @@ def tournament_selection(population, k):
     return best
 
 
-def crossover(parent1, parent2):
+def crossover(parent1: Individual, parent2: Individual) -> tuple[Individual, Individual]:
     swap_index = [randint(parent1.genotype_len)]
     genotype_len = parent1.genotype_len
     genotype1 = deepcopy(parent1.genotype)
@@ -52,7 +53,7 @@ def crossover(parent1, parent2):
     return child1, child2
 
 
-def mutate(individual):
+def mutate(individual: Individual) -> Individual:
     if random() < args.mutation_prob:
 
         swap_index = [randint(individual.genotype_len)]
@@ -76,7 +77,7 @@ def mutate(individual):
     return individual
 
 
-def crowding(parents, children):
+def crowding(parents: tuple[Individual, Individual], children: tuple[Individual, Individual]) -> list[Individual]:
     best_Individuals = []
     dist1 = cosine(parents[0].genotype, children[0].genotype)
     dist2 = cosine(parents[1].genotype, children[0].genotype)
@@ -105,15 +106,15 @@ def crowding(parents, children):
     return best_Individuals
 
 
-def process_crossover_and_crowding(X, y, parent1, parent2):
+def process_crossover_crowding(X: ndarray, y: ndarray, parent1: Individual, parent2: Individual) -> list[Individual]:
     child1, child2 = crossover(parent1, parent2)
-    child1.fitness = evaluate_fitness(child1, X, y)
-    child2.fitness = evaluate_fitness(child2, X, y)
+    child1.fitness = evaluate_fitness(X, y, child1)
+    child2.fitness = evaluate_fitness(X, y, child2)
 
     return crowding((parent1, parent2), (child1, child2))
 
 
-def new_generation(X, y, population):
+def new_generation(X: ndarray, y: ndarray, population: list[Individual]) -> list[Individual]:
     new_population = []
 
     if args.multithreading:
@@ -123,13 +124,13 @@ def new_generation(X, y, population):
             parent1 = tournament_selection(population, args.tournament)
             parent2 = tournament_selection(population, args.tournament)
             parents.append((parent1, parent2))
-        
+
         with ProcessPoolExecutor() as executor:
             futures = []
 
             for parent1, parent2 in parents:
                 fn_args = (X, y, parent1, parent2)
-                futures.append(executor.submit(process_crossover_and_crowding, *fn_args))
+                futures.append(executor.submit(process_crossover_crowding, *fn_args))
 
             for future in as_completed(futures):
                 best_individuals = future.result()
@@ -141,13 +142,13 @@ def new_generation(X, y, population):
         parent1 = tournament_selection(population, args.tournament)
         parent2 = tournament_selection(population, args.tournament)
 
-        best_individuals = process_crossover_and_crowding(X, y, parent1, parent2)
+        best_individuals = process_crossover_crowding(X, y, parent1, parent2)
         new_population.extend(best_individuals)
 
     return new_population
 
 
-def print_train_info(population, generation, instant):
+def print_train_info(population: list[Individual], generation: int, instant: float) -> None:
     best_fitness = float(np.max([ind.fitness for ind in population if ind.fitness is not None]))
     avg_fitness = float(np.mean([ind.fitness for ind in population if ind.fitness is not None]))
 
@@ -161,7 +162,7 @@ def print_train_info(population, generation, instant):
     print(f"AVERAGE {avg_fitness:.2f}%", end="", flush=True)
 
 
-def print_test_info(population, instant):
+def print_test_info(population: list[Individual], instant: float) -> None:
     best_fitness = float(np.max([ind.fitness for ind in population if ind.fitness is not None]))
     avg_fitness = float(np.mean([ind.fitness for ind in population if ind.fitness is not None]))
 
@@ -175,17 +176,17 @@ def print_test_info(population, instant):
     print(f"AVERAGE {avg_fitness:.2f}%")
 
 
-def genetic_programming_train(X, y):
+def genetic_programming_train(X: ndarray, y: ndarray) -> list[Individual]:
     population = generate_initial_population(args.population_size)
 
     t0 = time()
-    population_evaluate_fitness(population, X, y)
+    population_evaluate_fitness(X, y, population)
 
     for generation in range(args.generations):
         # for ind in population:
-            # print(ind.genotype)
-            # print(ind.phenotype)
-            # print()
+        #     print(ind.genotype)
+        #     print(ind.phenotype)
+        #     print()
 
         print_train_info(population, generation, t0)
 
@@ -197,12 +198,12 @@ def genetic_programming_train(X, y):
     return population
 
 
-def genetic_programming_test(X, y, population):
+def genetic_programming_test(X: ndarray, y: ndarray, population: list[Individual]) -> None:
     t0 = time()
 
     for ind in population:
         ind.fitness = None
 
-    population_evaluate_fitness(population, X, y)
+    population_evaluate_fitness(X, y, population)
 
     print_test_info(population, t0)

@@ -1,4 +1,5 @@
 import argparse
+from argparse import Namespace
 
 import numpy as np
 
@@ -27,7 +28,7 @@ parser.add_argument("--tournament", type=int, default=3, help=help_tournament)
 parser.add_argument("--dataset", type=str, choices=["cancer", "wine"], required=True, help=help_dataset)
 
 
-def set_seed(seed):
+def set_seed(seed: int) -> None:
     np.random.seed(seed)
 
 
@@ -35,7 +36,7 @@ class Config:
     _instance = None
 
     @classmethod
-    def get_args(self):
+    def get_args(self) -> Namespace:
         if self._instance is None:
             self._instance = parser.parse_args()
         return self._instance
