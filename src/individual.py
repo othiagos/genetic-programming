@@ -63,3 +63,6 @@ class Individual:
             return True
 
         return self.fitness > other.fitness
+
+    def __float__(self) -> float:
+        return self.fitness

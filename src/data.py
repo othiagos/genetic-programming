@@ -2,7 +2,7 @@ import csv
 
 import numpy as np
 from numpy import ndarray
-from sklearn.preprocessing import normalize
+from sklearn.preprocessing import StandardScaler
 
 from config import Config
 
@@ -41,8 +41,9 @@ def load_data(dataset_name: str) -> tuple[ndarray, ndarray, ndarray, ndarray]:
     X_test = np.array(X_test)
     y_test = np.array(y_test)
 
-    X_train_normalized = normalize(X_train, norm="l2")
-    X_test_normalized = normalize(X_test, norm="l2")
+    scaler = StandardScaler()
+    X_test_normalized = scaler.fit_transform(X_test)
+    X_train_normalized = scaler.transform(X_train)
 
     num_samples = len(X_train)
     individual_size = len(X_train[0])
