@@ -1,0 +1,50 @@
+BootStrap: library
+From: ubuntu:22.04
+
+%post
+    cd
+    apt -y update
+    DEBIAN_FRONTEND=noninteractive \
+    apt -y install \
+    git \
+    curl \
+    wget \
+    zip
+
+    apt -y install \
+    make \
+    libssl-dev \
+    zlib1g-dev \
+    libbz2-dev \
+    libreadline-dev \
+    libsqlite3-dev \
+    llvm \
+    libncursesw5-dev \
+    xz-utils \
+    tk-dev \
+    libxml2-dev \
+    libxmlsec1-dev \
+    libffi-dev \
+    liblzma-dev
+
+    wget https://www.python.org/ftp/python/3.12.6/Python-3.12.6.tar.xz
+    tar -xvf Python-3.12.6.tar.xz
+    cd Python-3.12.6
+    ./configure
+    make
+    make install
+    cd
+
+    git clone https://github.com/othiagos/genetic-programming.git
+    pip3.11 install -r genetic-programming/requirements.txt
+
+    # limpar cache das instalações
+    rm -rf /var/lib/apt/lists/*
+    apt-get clean
+
+
+%environment
+    
+
+%labels
+    Thiago 
