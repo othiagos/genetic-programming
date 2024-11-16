@@ -1,4 +1,4 @@
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor
 from copy import deepcopy
 from time import monotonic as time
 
@@ -7,9 +7,10 @@ from numpy import ndarray
 from numpy.random import choice, randint, random
 from scipy.spatial.distance import cosine
 
-from config import LEN_OPERATOR, Config
+from config import LEN_OPERATOR, Config, set_seed
 from evaluation import evaluate_fitness, population_evaluate_fitness
 from individual import Individual
+from info import print_test_info, print_train_info
 
 args = Config.get_args()
 
@@ -103,7 +104,12 @@ def crowding(parents: tuple[Individual, Individual], children: tuple[Individual,
     return best_Individuals
 
 
-def process_crossover_crowding(X: ndarray, y: ndarray, parent1: Individual, parent2: Individual) -> list[Individual]:
+def process_crossover_crowding(
+    X: ndarray, y: ndarray, parent1: Individual, parent2: Individual, seed: int = None
+) -> list[Individual]:
+    if seed is not None:
+        set_seed(seed)
+
     child1, child2 = crossover(parent1, parent2)
     child1.fitness = evaluate_fitness(X, y, child1)
     child2.fitness = evaluate_fitness(X, y, child2)
@@ -126,10 +132,11 @@ def new_generation(X: ndarray, y: ndarray, population: list[Individual]) -> list
             futures = []
 
             for parent1, parent2 in parents:
-                fn_args = (X, y, parent1, parent2)
+                args.seed += 1
+                fn_args = (X, y, parent1, parent2, args.seed)
                 futures.append(executor.submit(process_crossover_crowding, *fn_args))
 
-            for future in as_completed(futures):
+            for future in futures:
                 best_individuals = future.result()
                 new_population.extend(best_individuals)
 
@@ -145,49 +152,6 @@ def new_generation(X: ndarray, y: ndarray, population: list[Individual]) -> list
     return new_population
 
 
-def get_generation_info(population_fitness: ndarray) -> tuple[float, float, float, float]:
-    best_fitness = np.max(population_fitness) * 100
-    min_fitness = np.min(population_fitness) * 100
-    avg_fitness = np.mean(population_fitness) * 100
-    std_fitness = np.std(population_fitness) * 100
-
-    return best_fitness, min_fitness, avg_fitness, std_fitness
-
-
-def time_info(time: float) -> None:
-    print(f"\n[{time:.6f}s]", end=" ")
-
-
-def generation_info(best: float, min: float, avg: float, std: float) -> None:
-    print(f"BEST {best:7.4f}% ", end="| ")
-    print(f"WORSE {min:7.4f}% ", end="| ")
-    print(f"AVG {avg:7.4f}% ", end="| ")
-    print(f"STD {std:7.4f}%", end="")
-
-
-def print_train_info(population: list[Individual], generation: int, instant: float) -> None:
-    population_fitness = np.array([float(ind) for ind in population])
-
-    best_fitness, min_fitness, avg_fitness, std_fitness = get_generation_info(population_fitness)
-
-    gen_time = time() - instant
-    time_info(gen_time)
-    print(f"GENERATION {generation:04d} ", end="| ")
-    generation_info(best_fitness, min_fitness, avg_fitness, std_fitness)
-
-
-def print_test_info(population: list[Individual], instant: float) -> None:
-    population_fitness = np.array([float(ind) for ind in population])
-
-    best_fitness, min_fitness, avg_fitness, std_fitness = get_generation_info(population_fitness)
-
-    gen_time = time() - instant
-    time_info(gen_time)
-    print(f"GENERATION TEST ", end="| ")
-    generation_info(best_fitness, min_fitness, avg_fitness, std_fitness)
-    print()
-
-
 def genetic_programming_train(X: ndarray, y: ndarray) -> list[Individual]:
     population = generate_initial_population(args.population_size)
 
@@ -195,12 +159,6 @@ def genetic_programming_train(X: ndarray, y: ndarray) -> list[Individual]:
     population_evaluate_fitness(X, y, population)
 
     for generation in range(args.generations):
-        # population.sort(reverse=True)
-        # print()
-        # for ind in population:
-        #     print(ind.genotype)
-        #     print(ind.phenotype)
-        #     print()
 
         print_train_info(population, generation, gen_start_time)
 
@@ -221,3 +179,5 @@ def genetic_programming_test(X: ndarray, y: ndarray, population: list[Individual
     population_evaluate_fitness(X, y, population)
 
     print_test_info(population, gen_start_time)
+
+    return population

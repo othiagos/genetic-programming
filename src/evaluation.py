@@ -6,7 +6,7 @@ from numpy import ndarray
 from sklearn.cluster import AgglomerativeClustering
 from sklearn.metrics import v_measure_score
 
-from config import Config
+from config import Config, set_seed
 from individual import Individual
 
 args = Config.get_args()
@@ -27,7 +27,10 @@ def calculate_distance_matrix(X: ndarray, individual: Individual) -> ndarray:
     return matrix_distances
 
 
-def evaluate_fitness(X: ndarray, y: ndarray, individual: Individual) -> float:
+def evaluate_fitness(X: ndarray, y: ndarray, individual: Individual, seed: int = None) -> float:
+    if seed is not None:
+        set_seed(seed)
+
     try:
         if individual.fitness is not None:
             return individual.fitness
@@ -63,7 +66,12 @@ def safe_eval(expression: str, vars_dict: dict) -> float:
 def population_evaluate_fitness(X: ndarray, y: ndarray, population: list[Individual]) -> None:
     if args.multithreading:
         with ProcessPoolExecutor() as executor:
-            futures = {executor.submit(evaluate_fitness, X, y, ind): ind for ind in population}
+            futures = {}
+
+            for ind in population:
+                args.seed += 1
+                futures[executor.submit(evaluate_fitness, X, y, ind, args.seed)] = ind
+
             for future in as_completed(futures):
                 ind = futures[future]
                 ind.fitness = future.result()
