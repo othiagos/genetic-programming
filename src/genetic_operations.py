@@ -164,8 +164,7 @@ def genetic_programming_train(X: ndarray, y: ndarray) -> list[Individual]:
 
         gen_start_time = time()
 
-        new_population = new_generation(X, y, population)
-        population = new_population
+        population = new_generation(X, y, population)
 
     return population
 

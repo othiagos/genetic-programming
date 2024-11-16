@@ -43,7 +43,7 @@ parser.add_argument("--seed", type=int, help=help_seed)
 parser.add_argument("--multithreading", type=int, default=1, help=help_multithreading)
 parser.add_argument("--tournament", type=int, default=3, help=help_tournament)
 parser.add_argument("--dataset", type=str, choices=["cancer", "wine"], required=True, help=help_dataset)
-parser.add_argument("--expr_file", type=str, default=None, help=help_csv_file)
+parser.add_argument("--expr_file", action="store_true", help=help_csv_file)
 
 
 args = Config.get_args()

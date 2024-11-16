@@ -10,8 +10,6 @@ from info import get_generation_info
 args = Config.get_args()
 
 EXPERIMENT_FOLDER = "experiment/"
-EXPERIMENT_FILE = args.expr_file if args.expr_file is None else args.expr_file + ".csv"
-
 
 def process_population(train_population: ndarray, test_population: ndarray) -> dict:
     train_population_fitness = np.array([float(ind) for ind in train_population])
@@ -31,15 +29,27 @@ def process_population(train_population: ndarray, test_population: ndarray) -> d
     }
 
 
+def get_experiment_file_name():
+
+    dataset = args.dataset.upper()
+    population = args.population_size
+    generation = args.generations
+    mutation = int(args.mutation_prob * 100)
+    tournament = args.tournament
+    depth = args.depth
+    return f"EXPR_{dataset}_P{population}_G{generation}_M{mutation:02d}_T{tournament}_D{depth}.csv"
+
 def save_info_experiment(train_population: ndarray, test_population: ndarray) -> None:
 
-    if EXPERIMENT_FILE is None:
+    if not args.expr_file:
         return
+    
+    experiment_file = get_experiment_file_name()
 
     os.makedirs(EXPERIMENT_FOLDER, exist_ok=True)
     write_header = False
 
-    expr_path = os.path.join(EXPERIMENT_FOLDER, EXPERIMENT_FILE)
+    expr_path = os.path.join(EXPERIMENT_FOLDER, experiment_file)
     if not os.path.exists(expr_path):
         write_header = True
 
