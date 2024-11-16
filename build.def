@@ -9,9 +9,7 @@ From: ubuntu:22.04
     git \
     curl \
     wget \
-    zip
-
-    apt -y install \
+    zip \
     make \
     libssl-dev \
     zlib1g-dev \
