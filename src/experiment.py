@@ -5,11 +5,20 @@ import numpy as np
 from numpy import ndarray
 
 from config import Config
-from info import get_generation_info
 
 args = Config.get_args()
 
 EXPERIMENT_FOLDER = "experiment/"
+
+
+def get_generation_info(population_fitness: np.ndarray) -> tuple[float, float, float, float]:
+    best_fitness = np.max(population_fitness) * 100
+    min_fitness = np.min(population_fitness) * 100
+    avg_fitness = np.mean(population_fitness) * 100
+    std_fitness = np.std(population_fitness) * 100
+
+    return best_fitness, min_fitness, avg_fitness, std_fitness
+
 
 def process_population(train_population: ndarray, test_population: ndarray) -> dict:
     train_population_fitness = np.array([float(ind) for ind in train_population])
@@ -39,11 +48,23 @@ def get_experiment_file_name():
     depth = args.depth
     return f"EXPR_{dataset}_P{population}_G{generation}_M{mutation:02d}_T{tournament}_D{depth}.csv"
 
+
+def get_gen_info_file_name():
+
+    dataset = args.dataset.upper()
+    population = args.population_size
+    generation = args.generations
+    mutation = int(args.mutation_prob * 100)
+    tournament = args.tournament
+    depth = args.depth
+    return f"GEN_INFO_{dataset}_P{population}_G{generation}_M{mutation:02d}_T{tournament}_D{depth}.csv"
+
+
 def save_info_experiment(train_population: ndarray, test_population: ndarray) -> None:
 
     if not args.expr_file:
         return
-    
+
     experiment_file = get_experiment_file_name()
 
     os.makedirs(EXPERIMENT_FOLDER, exist_ok=True)
@@ -62,3 +83,35 @@ def save_info_experiment(train_population: ndarray, test_population: ndarray) ->
             writer.writeheader()
 
         writer.writerow(population_data)
+
+
+def save_gen_info(generation: int, best: float, min: float, avg: float, std: float) -> None:
+
+    if not args.gen_file:
+        return
+
+    gen_info_data = {
+        "generation": generation,
+        "best_fitness": best,
+        "min_fitness": min,
+        "avg_fitness": avg,
+        "std_fitness": std,
+    }
+
+    gen_info_file = get_gen_info_file_name()
+
+    os.makedirs(EXPERIMENT_FOLDER, exist_ok=True)
+    write_header = False
+
+    gen_path = os.path.join(EXPERIMENT_FOLDER, gen_info_file)
+    if not os.path.exists(gen_path):
+        write_header = True
+
+    with open(gen_path, mode="a", newline="", encoding="utf-8") as gen_file:
+
+        writer = csv.DictWriter(gen_file, fieldnames=gen_info_data.keys())
+
+        if write_header:
+            writer.writeheader()
+
+        writer.writerow(gen_info_data)

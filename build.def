@@ -34,7 +34,7 @@ From: ubuntu:22.04
     cd
 
     git clone https://github.com/othiagos/genetic-programming.git
-    pip3.11 install -r genetic-programming/requirements.txt
+    pip3 install -r genetic-programming/requirements.txt
 
     # limpar cache das instalações
     rm -rf /var/lib/apt/lists/*

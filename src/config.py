@@ -33,6 +33,7 @@ help_multithreading = "Usar múltiplas threads para avaliação de fitness (0 pa
 help_tournament = "Número de indivíduos a serem selecionados no torneio"
 help_dataset = "Escolha da base de dados: 'cancer' ou 'wine'"
 help_csv_file = "Nome do arquivo CSV onde os resultados serão salvos (opcional)"
+help_gen_csv_file = ""
 
 parser = argparse.ArgumentParser(description=help_description)
 parser.add_argument("--population_size", type=int, default=30, help=help_population_size)
@@ -44,6 +45,7 @@ parser.add_argument("--multithreading", type=int, default=1, help=help_multithre
 parser.add_argument("--tournament", type=int, default=3, help=help_tournament)
 parser.add_argument("--dataset", type=str, choices=["cancer", "wine"], required=True, help=help_dataset)
 parser.add_argument("--expr_file", action="store_true", help=help_csv_file)
+parser.add_argument("--gen_file", action="store_true", help=help_gen_csv_file)
 
 
 args = Config.get_args()

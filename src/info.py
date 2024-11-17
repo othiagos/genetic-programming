@@ -1,16 +1,8 @@
 
 from time import monotonic as time
 import numpy as np
+from experiment import get_generation_info, save_gen_info
 from individual import Individual
-
-
-def get_generation_info(population_fitness: np.ndarray) -> tuple[float, float, float, float]:
-    best_fitness = np.max(population_fitness) * 100
-    min_fitness = np.min(population_fitness) * 100
-    avg_fitness = np.mean(population_fitness) * 100
-    std_fitness = np.std(population_fitness) * 100
-
-    return best_fitness, min_fitness, avg_fitness, std_fitness
 
 
 def time_info(time: float) -> None:
@@ -28,6 +20,7 @@ def print_train_info(population: list[Individual], generation: int, instant: flo
     population_fitness = np.array([float(ind) for ind in population])
 
     best_fitness, min_fitness, avg_fitness, std_fitness = get_generation_info(population_fitness)
+    save_gen_info(generation, best_fitness, min_fitness, avg_fitness, std_fitness)
 
     gen_time = time() - instant
     time_info(gen_time)
@@ -39,6 +32,7 @@ def print_test_info(population: list[Individual], instant: float) -> None:
     population_fitness = np.array([float(ind) for ind in population])
 
     best_fitness, min_fitness, avg_fitness, std_fitness = get_generation_info(population_fitness)
+    save_gen_info(-1, best_fitness, min_fitness, avg_fitness, std_fitness)
 
     gen_time = time() - instant
     time_info(gen_time)
