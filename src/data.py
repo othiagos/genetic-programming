@@ -15,6 +15,16 @@ args = Config.get_args()
 
 
 def load_data(dataset_name: str) -> tuple[ndarray, ndarray, ndarray, ndarray]:
+    """
+    Loads and preprocesses the dataset specified by its name.
+
+    @param dataset_name: The name of the dataset to load (must match a key in DATASET_PATHS).
+    @return: A tuple containing:
+        - Normalized training features (ndarray)
+        - Training labels (ndarray)
+        - Normalized test features (ndarray)
+        - Test labels (ndarray)
+    """
     paths = DATASET_PATHS[dataset_name]
 
     # Load training data
@@ -47,6 +57,8 @@ def load_data(dataset_name: str) -> tuple[ndarray, ndarray, ndarray, ndarray]:
 
     num_samples = len(X_train)
     individual_size = len(X_train[0])
+    args.individual_size = individual_size
+
     precomputed_x_dicts = [{f"x_{k}": X_train[i][k] for k in range(individual_size)} for i in range(num_samples)]
     precomputed_y_dicts = [{f"y_{k}": X_train[j][k] for k in range(individual_size)} for j in range(num_samples)]
 

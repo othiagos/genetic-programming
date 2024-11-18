@@ -16,10 +16,23 @@ args = Config.get_args()
 
 
 def generate_initial_population(size: int) -> list[Individual]:
+    """
+    Generates an initial population of individuals.
+
+    @param size: Number of individuals in the population.
+    @return list[Individual]: A list of newly created individuals.
+    """
     return [Individual(depth=args.depth, individual_size=args.individual_size) for _ in range(size)]
 
 
 def tournament_selection(population: list[Individual], k: int) -> Individual:
+    """
+    Selects the best individual from a random subset of the population.
+
+    @param population: The current population of individuals.
+    @param k: Number of individuals to participate in the tournament.
+    @return Individual: The best individual from the subset.
+    """
     if k > len(population):
         k = len(population)
 
@@ -31,6 +44,13 @@ def tournament_selection(population: list[Individual], k: int) -> Individual:
 
 
 def crossover(parent1: Individual, parent2: Individual) -> tuple[Individual, Individual]:
+    """
+    Performs crossover between two parents to generate two offspring.
+
+    @param parent1: The first parent individual.
+    @param parent2: The second parent individual.
+    @return tuple[Individual, Individual]: Two offspring resulting from crossover.
+    """
     swap_index = [randint(parent1.genotype_len)]
     genotype_len = parent1.genotype_len
     genotype1 = deepcopy(parent1.genotype)
@@ -52,6 +72,12 @@ def crossover(parent1: Individual, parent2: Individual) -> tuple[Individual, Ind
 
 
 def mutate(individual: Individual) -> Individual:
+    """
+    Applies mutation to an individual with a certain probability.
+
+    @param individual: The individual to mutate.
+    @return Individual: The mutated individual.
+    """
     if random() < args.mutation_prob:
 
         swap_index = [randint(individual.genotype_len)]
@@ -76,6 +102,13 @@ def mutate(individual: Individual) -> Individual:
 
 
 def crowding(parents: tuple[Individual, Individual], children: tuple[Individual, Individual]) -> list[Individual]:
+    """
+    Selects the best individuals based on genetic similarity and fitness.
+
+    @param parents: A tuple containing two parent individuals.
+    @param children: A tuple containing two child individuals.
+    @return list[Individual]: A list of two individuals chosen for the next generation.
+    """
     best_Individuals = []
     dist1 = cosine(parents[0].genotype, children[0].genotype)
     dist2 = cosine(parents[1].genotype, children[0].genotype)
@@ -107,6 +140,16 @@ def crowding(parents: tuple[Individual, Individual], children: tuple[Individual,
 def process_crossover_crowding(
     X: ndarray, y: ndarray, parent1: Individual, parent2: Individual, seed: int = None
 ) -> list[Individual]:
+    """
+    Performs crossover, mutation, and crowding with fitness evaluation.
+
+    @param X: Training data.
+    @param y: Labels for the training data.
+    @param parent1: The first parent individual.
+    @param parent2: The second parent individual.
+    @param seed: Random seed for reproducibility.
+    @return list[Individual]: Two best individuals selected from parents and offspring.
+    """
     if seed is not None:
         set_seed(seed)
 
@@ -118,6 +161,14 @@ def process_crossover_crowding(
 
 
 def new_generation(X: ndarray, y: ndarray, population: list[Individual]) -> list[Individual]:
+    """
+    Generates a new population from the current population.
+
+    @param X: Training data.
+    @param y: Labels for the training data.
+    @param population: The current population of individuals.
+    @return list[Individual]: The new population.
+    """
     new_population = []
 
     if args.multithreading:
@@ -153,6 +204,13 @@ def new_generation(X: ndarray, y: ndarray, population: list[Individual]) -> list
 
 
 def genetic_programming_train(X: ndarray, y: ndarray) -> list[Individual]:
+    """
+    Trains the genetic programming algorithm.
+
+    @param X: Training data.
+    @param y: Labels for the training data.
+    @return list[Individual]: The final population after all generations.
+    """
     population = generate_initial_population(args.population_size)
 
     gen_start_time = time()
@@ -170,6 +228,13 @@ def genetic_programming_train(X: ndarray, y: ndarray) -> list[Individual]:
 
 
 def genetic_programming_test(X: ndarray, y: ndarray, population: list[Individual]) -> None:
+    """
+    Evaluates the final population on test data and prints results.
+
+    @param X: Test data.
+    @param y: Labels for the test data.
+    @param population: The population of individuals to evaluate.
+    """
     gen_start_time = time()
 
     for ind in population:

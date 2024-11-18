@@ -13,6 +13,13 @@ args = Config.get_args()
 
 
 def calculate_distance_matrix(X: ndarray, individual: Individual) -> ndarray:
+    """
+    Calculates the pairwise distance matrix for the given data and individual.
+
+    @param X: Data points as a NumPy array of shape (n_samples, n_features).
+    @param individual: The individual containing the phenotype to compute distances.
+    @return: A symmetric distance matrix (ndarray) of shape (n_samples, n_samples).
+    """
     num_samples = len(X)
     matrix_distances = np.zeros((num_samples, num_samples))
 
@@ -28,6 +35,15 @@ def calculate_distance_matrix(X: ndarray, individual: Individual) -> ndarray:
 
 
 def evaluate_fitness(X: ndarray, y: ndarray, individual: Individual, seed: int = None) -> float:
+    """
+    Evaluates the fitness of an individual using clustering and a custom distance matrix.
+
+    @param X: Data points as a NumPy array of shape (n_samples, n_features).
+    @param y: Ground truth labels as a NumPy array of shape (n_samples,).
+    @param individual: The individual whose fitness is being evaluated.
+    @param seed: Random seed for reproducibility (optional).
+    @return: The fitness value (float) of the individual.
+    """
     if seed is not None:
         set_seed(seed)
 
@@ -44,13 +60,20 @@ def evaluate_fitness(X: ndarray, y: ndarray, individual: Individual, seed: int =
     except ZeroDivisionError:
         individual.fitness = 0
     except Exception as e:
-        print(f"Erro na avaliação da fitness: {e}")
+        print(f"Error in fitness evaluation: {e}")
         individual.fitness = 0
 
     return individual.fitness
 
 
 def safe_eval(expression: str, vars_dict: dict) -> float:
+    """
+    Safely evaluates a mathematical expression using predefined variables.
+
+    @param expression: The mathematical expression to evaluate as a string.
+    @param vars_dict: A dictionary of variable names and their values for evaluation.
+    @return: The result of the evaluation (float). Returns 0.0 if the evaluation fails.
+    """
     try:
         result = ne.evaluate(expression, vars_dict)
         if np.isfinite(result):
@@ -59,11 +82,18 @@ def safe_eval(expression: str, vars_dict: dict) -> float:
             return 0.0
     except Exception as e:
         print(expression)
-        print(f"Erro na expressão: {e}")
+        print(f"Error in the expression: {e}")
         return 0.0
 
 
 def population_evaluate_fitness(X: ndarray, y: ndarray, population: list[Individual]) -> None:
+    """
+    Evaluates the fitness of a population of individuals, using multithreading if enabled.
+
+    @param X: Data points as a NumPy array of shape (n_samples, n_features).
+    @param y: Ground truth labels as a NumPy array of shape (n_samples,).
+    @param population: A list of individuals whose fitness will be evaluated.
+    """
     if args.multithreading:
         with ProcessPoolExecutor() as executor:
             futures = {}

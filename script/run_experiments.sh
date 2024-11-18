@@ -1,18 +1,18 @@
-#!/usr/bin/zsh
+#!/usr/bin/bash
 
-# Nome do script Python
+# Name of the Python script
 PYTHON_SCRIPT="src/main.py"
 SCRIPT_MEAN="script/calculate_means.py"
 
-# Verifica se o script Python existe
+# Checks if the Python script exists
 if [ ! -f "$PYTHON_SCRIPT" ]; then
-    echo "Erro: Arquivo '$PYTHON_SCRIPT' não encontrado!"
+    echo "Error: File '$PYTHON_SCRIPT' not found!"
     exit 1
 fi
 
 seed=137
 
-# Argumentos recebidos
+# Arguments received
 DS="cancer"
 DS_UPCASE=$(echo $DS | tr 'a-z' 'A-Z')
 P=$1
@@ -27,16 +27,16 @@ MM=$(printf "%02d" $MM)
 CSV="EXPR_${DS_UPCASE}_P${P}_G${G}_M${MM}_T${T}_D${D}.csv"
 echo $CSV
 
-# Loop para executar 10 vezes
+# Loop to execute 10 times
 for i in {1..10}; do
-    echo "Execução $i:"
-    # Passando os argumentos diretamente ao script Python
+    echo "Execution $i:"
+    # Passing the arguments directly to the Python script
     python3 "$PYTHON_SCRIPT" --dataset "$DS" --population_size "$P" --generations "$G" --mutation_prob "$M" --tournament "$T" --depth "$D" --expr_file --seed $((seed + i))
-    # Verifica se houve erro na execução
+    # Checks if there was an error in the execution
     if [ $? -ne 0 ]; then
-        echo "Erro na execução $i"
+        echo "Error in execution $i"
     fi
-    echo "Execução $i concluída"
+    echo "Execution $i completed"
     echo "---------------------------"
 done
 

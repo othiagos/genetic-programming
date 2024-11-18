@@ -10,30 +10,47 @@ LEN_OPERATOR = len(OPERATOR)
 
 
 class Config:
+    """
+    Singleton class to manage configuration arguments.
+
+    @method get_args: Retrieves the parsed arguments as a Namespace.
+    """
+
     _instance = None
 
     @classmethod
     def get_args(self) -> Namespace:
+        """
+        Retrieves the parsed command-line arguments.
+
+        @return Namespace: Parsed arguments.
+        """
         if self._instance is None:
             self._instance = parser.parse_args()
         return self._instance
 
 
 def set_seed(seed: int) -> None:
+    """
+    Sets the random seed for NumPy's random number generator.
+
+    @param seed: Seed value for reproducibility.
+    """
     np.random.seed(seed)
 
 
-help_description = "Configurações do algoritmo de programação genética"
-help_population_size = "Tamanho da população"
-help_generations = "Número de gerações"
-help_mutation_prob = "Probabilidade de mutação"
-help_depth = "Tamanho máximo da árvores dos indivíduos"
-help_seed = "Semente para o gerador de números aleatórios"
-help_multithreading = "Usar múltiplas threads para avaliação de fitness (0 para não, qualquer valor para sim)"
-help_tournament = "Número de indivíduos a serem selecionados no torneio"
-help_dataset = "Escolha da base de dados: 'cancer' ou 'wine'"
-help_csv_file = "Nome do arquivo CSV onde os resultados serão salvos (opcional)"
-help_gen_csv_file = ""
+help_description = "Genetic programming algorithm configurations"
+help_population_size = "Population size"
+help_generations = "Number of generations"
+help_mutation_prob = "Mutation probability"
+help_depth = "Maximum tree depth of the individuals"
+help_seed = "Seed for the random number generator"
+help_multithreading = "Use multiple threads for fitness evaluation (0 for no, any value for yes)"
+help_tournament = "Number of individuals to select in the tournament"
+help_dataset = "Choose the dataset: 'cancer' or 'wine'"
+help_csv_file = "Name of the CSV file where results will be saved (optional)"
+help_gen_csv_file = "Name of the CSV file to save generation results (optional)"
+
 
 parser = argparse.ArgumentParser(description=help_description)
 parser.add_argument("--population_size", type=int, default=30, help=help_population_size)
@@ -49,6 +66,7 @@ parser.add_argument("--gen_file", action="store_true", help=help_gen_csv_file)
 
 
 args = Config.get_args()
+args.multithreading = args.multithreading != 0
 
 if args.seed is None:
     args.seed = time() % 2**32 - 1
